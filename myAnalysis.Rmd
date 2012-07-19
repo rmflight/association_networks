@@ -1,0 +1,64 @@
+# Association Networks
+
+[Karpinets et al][assLink] recently published a paper on analyzing data with association networks. This looks rather interesting, but they made a claim in their work that they could generate better networks of associations by first calculating the association of an annotation with all other annotations (annotation profile), and then calculating the correlations between annotation profiles.
+
+The claim is that they get information about indirect associations this way that they don't get by looking at direct co-occurrences. They claim that when they do a direct network, all they get is a dense hairball.
+
+However, I was wondering what they would have gotten had they trimmed their direct associations based on the edge weights (degree of overlap), as proposed by [Merico et al][emLink] for their tool enrichment map.
+
+```{r knitrsetup, echo=FALSE}
+# sets output for inline results nicely
+knit_hooks$set(inline = identity) 
+
+# kills knitr if there is an error, therefore we don't waste time generating error messages
+knit_hooks$set(error = function(x, options) stop(x)) 
+```
+
+```{r rsetup}
+# these are extremely useful options for working in R
+options(save.defaults=list(compress="xz"), stringsAsFactors=FALSE)
+```
+
+## Libraries required
+
+I am going to use **RCytoscape** for the network visualization, and **graph** in **R** to work with the networks that we generate.
+
+```{r libraries}
+require(graph)
+require(RCytoscape)
+```
+
+
+## Get data
+
+The original data comes from the **GOLD** database, and is a series of attributes about bacterial species.
+
+```{r getData}
+gb <- read.table("anet-v1.0/GB.data", sep="\t", header=T, quote="", strip.white=T)
+```
+
+## Arrange data
+
+For each group of annotations, get all of the unique attributes, and then determine which entries have which attributes, generating a list of associated entries for each annotation.
+
+For each annotation column, split on comma, and then do a reverse
+
+```{r arrangeAtts}
+attTypes <- names(gb[,seq(2, ncol(gb))])
+
+attAssoc <- vector("list", length(attTypes))
+names(attAssoc) <- attTypes
+
+attEntries <- vector("list", 0)
+annNames <- as.character(seq(1, nrow(gb)))
+
+for (iType in 1:length(attTypes)){
+	tmpAnn <- gb[,attTypes[iType]]
+	tmpAnn <- strsplit(tmpAnn, ",")
+	names(tmpAnn) <- annNames
+	tmpAnn <- reverseSplit(tmpAnn)
+	attEntries <- c(attEntries, tmpAnn)
+	
+	attAssoc[[iType]] <- names(tmpAnn)
+}
+```
