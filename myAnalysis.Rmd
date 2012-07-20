@@ -26,6 +26,7 @@ I am going to use **RCytoscape** for the network visualization, and **graph** in
 ```{r libraries}
 require(graph)
 require(RCytoscape)
+require(Biobase)
 ```
 
 
@@ -44,21 +45,97 @@ For each group of annotations, get all of the unique attributes, and then determ
 For each annotation column, split on comma, and then do a reverse
 
 ```{r arrangeAtts}
-attTypes <- names(gb[,seq(2, ncol(gb))])
+attCols <- names(gb[,seq(2, ncol(gb))])
 
-attAssoc <- vector("list", length(attTypes))
-names(attAssoc) <- attTypes
-
+attTypes <- vector("character", 0)
+attValues <- vector("character", 0)
 attEntries <- vector("list", 0)
-annNames <- as.character(seq(1, nrow(gb)))
 
-for (iType in 1:length(attTypes)){
-	tmpAnn <- gb[,attTypes[iType]]
+annNames <- seq(1, nrow(gb))
+
+for (iType in 1:length(attCols)){
+	tmpType <- attCols[iType]
+	tmpAnn <- gb[,tmpType]
 	tmpAnn <- strsplit(tmpAnn, ",")
 	names(tmpAnn) <- annNames
 	tmpAnn <- reverseSplit(tmpAnn)
+							 
+	attTypes <- c(attTypes, rep(tmpType, length(tmpAnn)))
+	attValues <- c(attValues, names(tmpAnn))
 	attEntries <- c(attEntries, tmpAnn)
 	
-	attAssoc[[iType]] <- names(tmpAnn)
 }
+```
+
+This has generated a list of the classes of annotations, the names of the annotations themselves, and a list with the entries that each annotation was an attribute of. Now we can calculate the similarity of each annotation with all of the other annotations based on which entries had a particular annotation as an attribute. 
+
+We will store this data in an adjacency matrix, with the degree of overlap (calculated using a Jaccard similarity score) stored as the edge weight.
+
+
+```{r adjMatrix}
+nodeNames <- paste(attTypes, attValues, sep=":")
+graphDat <- new("graphNEL", nodes=nodeNames, edgemode="directed") # this is pretty important!
+
+graphDat <- initNodeAttribute(graphDat, attribute.name="attType",
+															attribute.type="char", default.value="undefined")
+nodeData(graphDat, nodeNames, "attType") <- attTypes
+
+graphDat <- initNodeAttribute(graphDat, attribute.name="attName",
+															attribute.type="char", default.value="undefined")
+nodeData(graphDat, nodeNames, "attName") <- attValues
+
+graphDat <- initNodeAttribute(graphDat, attribute.name="label",
+															attribute.type="char", default.value="undefined")
+nodeData(graphDat, nodeNames, "label") <- nodeNames
+
+graphDat <- initEdgeAttribute(graphDat, attribute.name="weight",
+															attribute.type="numeric", default.value=0)
+
+nEnt <- length(attValues)
+
+# set up the full set of comparisons that need to be done
+allComp <- expand.grid(seq(1,nEnt),seq(1,nEnt))
+allComp <- allComp[(allComp[,2] > allComp[,1]),] # keep only where second is greater than first
+allComp <- as.matrix(allComp)
+
+# now go through allComp, using them as indices into the matrix
+jmAll <- sapply(seq(1,nrow(allComp)), function(x){
+	doComp <- allComp[x,]
+	a1 <- attEntries[[doComp[1]]]
+	a2 <- attEntries[[doComp[2]]]
+	
+	jm <- (length(intersect(a1,a2))) / (length(union(a1,a2)))
+	jm
+})
+
+notZero <- jmAll != 0
+
+allComp <- allComp[notZero,]
+
+jmAll <- jmAll[notZero]
+fromEdge <- nodeNames[allComp[,1]]
+toEdge <- nodeNames[allComp[,2]]
+
+graphDat <- addEdge(fromEdge, toEdge, graphDat, jmAll)
+
+```
+
+Load up Cytoscape, and pass the graph over.
+
+```{r passGraph}
+jmCy <- CytoscapeWindow('jmGraph', graph=graphDat)
+displayGraph(jmCy)
+setLayoutProperties(jmCy, "force-directed", list(edge_attribute='weight'))
+layoutNetwork(jmCy, "force-directed")
+```
+
+This does result in a massive hairball, so lets grab the edge weights, and delete some of the lower ones.
+
+```{r hideEdges}
+edgeDat <- getAllEdgeAttributes(jmCy)
+minEdges <- (edgeDat$weight <= 0.05)
+edgeNames <- paste(edgeDat$source[minEdges],' (unspecified) ',edgeDat$target[minEdges],sep='')
+selectEdges(jmCy, edgeNames)
+hideSelectedEdges(jmCy)
+layoutNetwork(jmCy, "force-directed")
 ```
